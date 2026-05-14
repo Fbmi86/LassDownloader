@@ -1,0 +1,84 @@
+/* styles.css - Firefox Extension */
+/* استایل‌های دکمه‌های تزریقی (مشابه Chrome) */
+
+.lass-video-btn {
+    position: absolute;
+    background: #0078D7;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    z-index: 9999;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    transition: opacity 0.2s, transform 0.1s;
+}
+
+.lass-video-btn:hover {
+    opacity: 1;
+    transform: scale(1.02);
+    background: #005a9e;
+}
+
+.lass-link-badge {
+    display: inline-block;
+    background: #0078D7;
+    color: white;
+    border-radius: 10px;
+    font-size: 10px;
+    padding: 0 4px;
+    margin-left: 5px;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+.lass-link-badge:hover {
+    background: #005a9e;
+}
+
+.lass-progress-bar {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    width: 300px;
+    background: #2d2d2d;
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: white;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 11px;
+    z-index: 100000;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    border-left: 3px solid #0078D7;
+}
+
+.lass-float-btn {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #2d2d2d;
+    color: white;
+    padding: 10px 15px;
+    border-radius: 8px;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 12px;
+    z-index: 100000;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    border: 1px solid #444;
+}
+
+.lass-float-btn button {
+    background: #4caf50;
+    border: none;
+    color: white;
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-left: 8px;
+}
+
+.lass-float-btn button.cancel {
+    background: #f44336;
+}
