@@ -1,0 +1,299 @@
+// Native messaging host name
+const HOST_NAME = "com.lassdownloader.native";
+
+let port = null;
+let reconnectTimer = null;
+let pendingDownloads = new Map();
+let activeDownloads = new Map();
+
+// ============================================================================
+// Native Messaging Connection
+// ============================================================================
+
+function connectToNative() {
+    if (port) {
+        try {
+            port.disconnect();
+        } catch(e) {}
+        port = null;
+    }
+    
+    console.log("[LassDownloader] Connecting to native host...");
+    
+    try {
+        port = chrome.runtime.connectNative(HOST_NAME);
+        
+        port.onMessage.addListener((message) => {
+            console.log("[LassDownloader] Received from native:", message);
+            handleNativeMessage(message);
+        });
+        
+        port.onDisconnect.addListener(() => {
+            console.log("[LassDownloader] Disconnected from native host");
+            port = null;
+            
+            // تلاش برای reconnect بعد از 5 ثانیه
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            reconnectTimer = setTimeout(connectToNative, 5000);
+        });
+        
+        // ارسال پیام آمادگی
+        port.postMessage({ type: "ready", client: "chrome" });
+        
+        updateConnectionStatus(true);
+        
+    } catch(e) {
+        console.error("[LassDownloader] Connection error:", e);
+        updateConnectionStatus(false);
+    }
+}
+
+function handleNativeMessage(message) {
+    switch(message.type) {
+        case "download_started":
+            activeDownloads.set(message.downloadId, {
+                filename: message.filename,
+                url: message.url,
+                progress: 0
+            });
+            updateBadge(0);
+            break;
+            
+        case "progress":
+            if (activeDownloads.has(message.downloadId)) {
+                activeDownloads.get(message.downloadId).progress = message.progress;
+                updateBadge(message.progress);
+            }
+            
+            // ارسال به content scripts برای نمایش پیشرفت
+            chrome.tabs.query({}, (tabs) => {
+                tabs.forEach(tab => {
+                    chrome.tabs.sendMessage(tab.id, {
+                        type: "progress",
+                        downloadId: message.downloadId,
+                        filename: message.filename,
+                        progress: message.progress,
+                        speed: message.speed
+                    }).catch(() => {});
+                });
+            });
+            break;
+            
+        case "complete":
+            if (activeDownloads.has(message.downloadId)) {
+                activeDownloads.delete(message.downloadId);
+                updateBadge(-1);
+            }
+            
+            // نمایش نوتیفیکیشن
+            chrome.notifications.create({
+                type: "basic",
+                iconUrl: "icons/icon48.png",
+                title: "✅ Download Complete",
+                message: `${message.filename} downloaded successfully!`,
+                priority: 2
+            });
+            break;
+            
+        case "error":
+            chrome.notifications.create({
+                type: "basic",
+                iconUrl: "icons/icon48.png",
+                title: "❌ Download Error",
+                message: `Failed to download: ${message.error}`,
+                priority: 2
+            });
+            break;
+    }
+}
+
+function updateConnectionStatus(connected) {
+    chrome.storage.local.set({ nativeConnected: connected });
+}
+
+function updateBadge(progress) {
+    if (progress === -1) {
+        chrome.action.setBadgeText({ text: "" });
+        return;
+    }
+    
+    if (progress > 0 && progress < 100) {
+        chrome.action.setBadgeText({ text: `${Math.round(progress)}%` });
+        chrome.action.setBadgeBackgroundColor({ color: "#0078D7" });
+    } else if (progress === 0) {
+        chrome.action.setBadgeText({ text: "↓" });
+        chrome.action.setBadgeBackgroundColor({ color: "#0078D7" });
+    }
+}
+
+// ============================================================================
+// Send Download to Native
+// ============================================================================
+
+function sendToDownloader(url, filename, referrer, tabId) {
+    if (!port) {
+        chrome.notifications.create({
+            type: "basic",
+            iconUrl: "icons/icon48.png",
+            title: "LassDownloader",
+            message: "Connecting to LassDownloader app... Please wait.",
+            priority: 1
+        });
+        connectToNative();
+        
+        setTimeout(() => {
+            if (port) {
+                sendToDownloader(url, filename, referrer, tabId);
+            }
+        }, 2000);
+        return;
+    }
+    
+    port.postMessage({
+        type: "download",
+        url: url,
+        filename: filename,
+        referrer: referrer || "",
+        tabId: tabId
+    });
+    
+    console.log("[LassDownloader] Sent to downloader:", url);
+}
+
+// ============================================================================
+// Auto Capture Downloads
+// ============================================================================
+
+chrome.webRequest.onBeforeRequest.addListener(
+    (details) => {
+        // فقط درخواست‌های اصلی را بررسی کن
+        if (details.type !== "main_frame" && details.type !== "sub_frame") {
+            const url = details.url;
+            
+            // لیست پسوندهای قابل دانلود
+            const downloadExtensions = [
+                '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2',
+                '.exe', '.msi', '.apk', '.dmg', '.deb', '.rpm',
+                '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+                '.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm',
+                '.mp3', '.flac', '.wav', '.aac', '.ogg', '.m4a',
+                '.iso', '.img', '.bin',
+                '.psd', '.ai', '.cdr',
+                '.torrent'
+            ];
+            
+            const isDownload = downloadExtensions.some(ext => 
+                url.toLowerCase().includes(ext) || 
+                url.toLowerCase().endsWith(ext)
+            );
+            
+            if (isDownload) {
+                chrome.storage.local.get(['autoCapture', 'showNotification'], (result) => {
+                    if (result.autoCapture) {
+                        let filename = url.split('/').pop().split('?')[0];
+                        if (!filename.includes('.')) filename += '.download';
+                        sendToDownloader(url, filename, details.initiator, details.tabId);
+                    } else {
+                        // نمایش دکمه شناور برای تایید
+                        chrome.tabs.sendMessage(details.tabId, {
+                            type: "showDownloadButton",
+                            url: url,
+                            filename: url.split('/').pop().split('?')[0]
+                        }).catch(() => {});
+                    }
+                });
+            }
+        }
+    },
+    { urls: ["<all_urls>"] }
+);
+
+// ============================================================================
+// Context Menu
+// ============================================================================
+
+chrome.runtime.onInstalled.addListener(() => {
+    chrome.contextMenus.create({
+        id: "downloadWithLass",
+        title: "Download with LassDownloader",
+        contexts: ["link", "image", "video", "audio", "selection"]
+    });
+    
+    chrome.contextMenus.create({
+        id: "downloadAllWithLass",
+        title: "Download All Links with LassDownloader",
+        contexts: ["page"]
+    });
+});
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+    if (info.menuItemId === "downloadWithLass") {
+        let url = info.linkUrl || info.srcUrl || info.selectionText || info.pageUrl;
+        let filename = url.split('/').pop().split('?')[0];
+        if (filename.length > 100) filename = "download";
+        sendToDownloader(url, filename, tab.url, tab.id);
+    } else if (info.menuItemId === "downloadAllWithLass") {
+        // استخراج همه لینک‌های صفحه
+        chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: () => {
+                return Array.from(document.querySelectorAll('a[href]'))
+                    .map(a => a.href)
+                    .filter(href => href.startsWith('http'));
+            }
+        }, (results) => {
+            if (results && results[0] && results[0].result) {
+                const links = results[0].result;
+                links.forEach(link => {
+                    let filename = link.split('/').pop().split('?')[0];
+                    sendToDownloader(link, filename, tab.url, tab.id);
+                });
+                
+                chrome.notifications.create({
+                    type: "basic",
+                    iconUrl: "icons/icon48.png",
+                    title: "LassDownloader",
+                    message: `Added ${links.length} links to download queue!`,
+                    priority: 1
+                });
+            }
+        });
+    }
+});
+
+// ============================================================================
+// Keyboard Shortcut
+// ============================================================================
+
+chrome.commands.onCommand.addListener((command) => {
+    if (command === "_execute_action") {
+        chrome.action.openPopup();
+    }
+});
+
+// ============================================================================
+// Open App
+// ============================================================================
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === "openApp") {
+        sendToDownloader("", "", "", null);
+        sendResponse({ status: "ok" });
+    } else if (message.type === "ping") {
+        sendResponse({ status: port ? "ok" : "error", connected: !!port });
+    } else if (message.type === "download") {
+        sendToDownloader(message.url, message.filename, message.referrer, sender.tab?.id);
+        sendResponse({ status: "ok" });
+    }
+});
+
+// ============================================================================
+// Initialize
+// ============================================================================
+
+connectToNative();
+
+// تنظیم خودکار در شروع مرورگر
+chrome.runtime.onStartup.addListener(() => {
+    setTimeout(connectToNative, 1000);
+});
