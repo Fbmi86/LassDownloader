@@ -1,0 +1,10 @@
+{
+  "name": "com.lassdownloader.native",
+  "description": "LassDownloader Native Messaging Host",
+  "path": "C:\\Program Files\\LassDownloader\\lass_host.exe",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://YOUR_CHROME_EXTENSION_ID/",
+    "moz-extension://YOUR_FIREFOX_EXTENSION_ID/"
+  ]
+}
